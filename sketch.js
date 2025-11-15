@@ -20,7 +20,7 @@ let achievedFirstDownThisPlay = false; // track first down mid-play without stop
 let cellSize = 40;
 let yardsPerCell = 5;
 let fieldYards = 100;
-let fieldCols = fieldYards / yardsPerCell;
+let fieldCols = fieldYards / yardsPerCell + 1; // +1 for wider end zone
 let fieldRows = 9;
 let fieldWidth = fieldCols * cellSize;
 let fieldHeight = fieldRows * cellSize;
@@ -162,18 +162,22 @@ function drawTracker() {
     side = "Away";
   }
 
-  // Scoreboard + clock
-  text(`Home: ${scoreHome}`, fieldWidth - 140, 20);
-  text(`Away: ${scoreAway}`, fieldWidth - 140, 40);
+  // Scoreboard + clock in end zone (left-aligned, vertically stacked)
+  const ezX = (fieldCols - 2) * cellSize + 10;
+  fill(255);
+  textSize(11);
+  textAlign(LEFT, BASELINE);
+  text(`Home: ${scoreHome}`, ezX, 25);
+  text(`Away: ${scoreAway}`, ezX, 40);
   const mm = nf(floor(clockSeconds / 60), 2);
   const ss = nf(clockSeconds % 60, 2);
-  text(`Time: ${mm}:${ss}`, fieldWidth - 140, 60);
-  text(`Poss: ${possession}`, fieldWidth - 140, 80);
+  text(`Time: ${mm}:${ss}`, ezX, 55);
+  text(`Poss: ${possession}`, ezX, 70);
 
   // Drive info
-  text(`${side} ${yardLine}`, fieldWidth - 140, 100);
-  text(`Down: ${currentDown}`, fieldWidth - 140, 120);
-  text(`To Go: ${yardsLeft}`, fieldWidth - 140, 140);
+  text(`${side} ${yardLine}`, ezX, 90);
+  text(`Down: ${currentDown}`, ezX, 105);
+  text(`To Go: ${yardsLeft}`, ezX, 120);
 }
 
 function drawField() {
@@ -185,13 +189,16 @@ function drawField() {
   for (let x = 0; x < fieldWidth; x += cellSize) line(x, 0, x, fieldHeight);
   for (let y = 0; y < fieldHeight; y += cellSize) line(0, y, fieldWidth, y);
 
+  // End zone (last 2 cells)
   fill(50, 150, 50);
   noStroke();
-  rect((fieldCols - 1) * cellSize, 0, cellSize, fieldHeight);
+  rect((fieldCols - 2) * cellSize, 0, cellSize * 2, fieldHeight);
 
   fill(255);
-  textSize(16);
-  text("TD", (fieldCols - 1) * cellSize + 10, 20);
+  textSize(18);
+  textAlign(CENTER, CENTER);
+  text("END\nZONE", (fieldCols - 1) * cellSize, fieldHeight / 2);
+  textAlign(LEFT, BASELINE);
 
   // Line of Scrimmage (LOS) at right edge of ball, First Down line stays fixed until achieved
   const losCol = constrain(startX + 1, 0, fieldCols - 1); // Right edge of ball
