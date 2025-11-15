@@ -28,6 +28,14 @@ let fieldHeight = fieldRows * cellSize;
 let gameOver = false;
 let touchdown = false;
 let continueButton;
+let scoreHome = 0;
+let scoreAway = 0;
+let clockSeconds = 300; // 5:00 clock placeholder
+let endReason = ""; // dynamic end-of-drive message (e.g., INTERCEPTION, PUNT)
+let possession = 'home'; // 'home' or 'away'
+let nextDriveStartX = 4; // default kickoff placement (20-yard line)
+let nextDriveType = 'kickoff'; // kickoff | punt | turnover
+let puntDistanceCells = 6; // ~30 yards
 
 function setFormationAtLOS() {
   // Reset per-down flags/state
@@ -59,12 +67,12 @@ function setFormationAtLOS() {
   ];
 
   // Defenders reset relative to LOS
-  // Within 20 yards of end zone (4 cells): all defenders line up on one line
+  // Within 5 yards of end zone (1 cell): defenders line up in a single column
   const yardsFromEndzone = (fieldCols - 1 - los) * yardsPerCell;
   let defOffsets;
 
-  if (yardsFromEndzone <= 15) {
-    // Goal line defense: all on one line
+  if (yardsFromEndzone <= 5) {
+    // Goal line defense: all on one column (same x, varied y)
     defOffsets = [
       { dx: 2, y: 2 }, { dx: 2, y: 3 }, { dx: 2, y: 4 },
       { dx: 2, y: 5 }, { dx: 2, y: 6 }, { dx: 2, y: 7 }
@@ -124,8 +132,11 @@ function draw() {
   if (gameOver) {
     fill(touchdown ? color(0, 255, 0) : color(255, 0, 0));
     textSize(32);
+    const message = endReason
+      ? endReason.toUpperCase()
+      : (touchdown ? "TOUCHDOWN!" : "TURNOVER ON DOWNS");
     text(
-      touchdown ? "TOUCHDOWN!" : "TURNOVER ON DOWNS",
+      message,
       fieldWidth / 2 - 150,
       fieldHeight / 2
     );
@@ -151,9 +162,18 @@ function drawTracker() {
     side = "Away";
   }
 
-  text(`${side} ${yardLine}`, fieldWidth - 120, 60);
-  text(`Down: ${currentDown}`, fieldWidth - 120, 80);
-  text(`To Go: ${yardsLeft}`, fieldWidth - 120, 100);
+  // Scoreboard + clock
+  text(`Home: ${scoreHome}`, fieldWidth - 140, 20);
+  text(`Away: ${scoreAway}`, fieldWidth - 140, 40);
+  const mm = nf(floor(clockSeconds / 60), 2);
+  const ss = nf(clockSeconds % 60, 2);
+  text(`Time: ${mm}:${ss}`, fieldWidth - 140, 60);
+  text(`Poss: ${possession}`, fieldWidth - 140, 80);
+
+  // Drive info
+  text(`${side} ${yardLine}`, fieldWidth - 140, 100);
+  text(`Down: ${currentDown}`, fieldWidth - 140, 120);
+  text(`To Go: ${yardsLeft}`, fieldWidth - 140, 140);
 }
 
 function drawField() {
@@ -267,13 +287,27 @@ function keyPressed() {
     if (keyCode === DOWN_ARROW  || key === 's') dy =  1;
 
     if (dx !== 0 || dy !== 0) {
-      offense.x = constrain(offense.x + dx, 0, fieldCols - 1);
-      offense.y = constrain(offense.y + dy, 0, fieldRows - 1);
+      // Candidate next position
+      const nextX = constrain(offense.x + dx, 0, fieldCols - 1);
+      const nextY = constrain(offense.y + dy, 0, fieldRows - 1);
+
+      // Prevent moving into blockers
+      const hitsBlocker = blockers.some(b => b.x === nextX && b.y === nextY);
+      if (hitsBlocker) return; // cancel move
+
+      offense.x = nextX;
+      offense.y = nextY;
       ballCarrier = offense;
 
       moveReceivers();
       if (++qbMoveCount >= 3) moveBlockers();
       moveDefenders();
+
+      // Drain clock per QB move
+      clockSeconds = max(0, clockSeconds - 1);
+      if (clockSeconds === 0) {
+        gameOver = true;
+      }
     }
   }
 
@@ -282,24 +316,84 @@ function keyPressed() {
     attemptPass();
     return false; // prevent browser focus shift
   }
+
+  // Punt (P)
+  if ((key === 'p' || key === 'P') && ballSnapped) {
+    // Punt: switch possession and place ball downfield by a fixed distance
+    endReason = "Punt";
+    nextDriveType = 'punt';
+    nextDriveStartX = constrain(startX + 1 + puntDistanceCells, 1, fieldCols - 2);
+    gameOver = true;
+  }
 }
 
 function moveReceivers() {
   receivers.forEach((r, i) => {
     if (receiverStep[i] < receiverRoutes[i].length) {
       let s = receiverRoutes[i][receiverStep[i]++];
-      r.x = constrain(r.x + s.dx, 0, fieldCols - 1);
-      r.y = constrain(r.y + s.dy, 0, fieldRows - 1);
+      const nextX = constrain(r.x + s.dx, 0, fieldCols - 1);
+      const nextY = constrain(r.y + s.dy, 0, fieldRows - 1);
+      const hitsBlocker = blockers.some(b => b.x === nextX && b.y === nextY);
+      if (!hitsBlocker) {
+        r.x = nextX;
+        r.y = nextY;
+      }
     }
   });
 }
 
 function moveBlockers() {
-  blockers.forEach((b, i) => {
+  // Compute intended moves
+  const currentPositions = new Set(blockers.map(b => `${b.x},${b.y}`));
+  const intents = blockers.map((b, i) => {
     if (blockerStep[i] < blockerRoutes[i].length) {
-      let s = blockerRoutes[i][blockerStep[i]++];
-      b.x = constrain(b.x + s.dx, 0, fieldCols - 1);
-      b.y = constrain(b.y + s.dy, 0, fieldRows - 1);
+      const s = blockerRoutes[i][blockerStep[i]];
+      const nx = constrain(b.x + s.dx, 0, fieldCols - 1);
+      const ny = constrain(b.y + s.dy, 0, fieldRows - 1);
+      return { i, nx, ny, canMove: true };
+    }
+    return { i, nx: b.x, ny: b.y, canMove: false };
+  });
+
+  // Prevent moving into an existing blocker position (other than itself)
+  intents.forEach(it => {
+    if (!it.canMove) return;
+    const key = `${it.nx},${it.ny}`;
+    const fromKey = `${blockers[it.i].x},${blockers[it.i].y}`;
+    if (key !== fromKey && currentPositions.has(key)) {
+      it.canMove = false;
+    }
+    // Also prevent moving into QB (offense) position
+    if (it.canMove && offense && it.nx === offense.x && it.ny === offense.y) {
+      it.canMove = false;
+    }
+    // Also prevent moving into any receiver position
+    if (it.canMove && receivers.some(r => r.x === it.nx && r.y === it.ny)) {
+      it.canMove = false;
+    }
+  });
+
+  // Prevent multiple blockers targeting same cell
+  const targetCounts = intents.reduce((m, it) => {
+    if (!it.canMove) return m;
+    const key = `${it.nx},${it.ny}`;
+    m.set(key, (m.get(key) || 0) + 1);
+    return m;
+  }, new Map());
+  intents.forEach(it => {
+    if (!it.canMove) return;
+    const key = `${it.nx},${it.ny}`;
+    if ((targetCounts.get(key) || 0) > 1) {
+      it.canMove = false;
+    }
+  });
+
+  // Apply valid moves and advance route steps only when moved
+  intents.forEach(it => {
+    if (it.canMove && blockerStep[it.i] < blockerRoutes[it.i].length) {
+      blockers[it.i].x = it.nx;
+      blockers[it.i].y = it.ny;
+      blockerStep[it.i]++;
     }
   });
 }
@@ -330,8 +424,12 @@ function moveDefenders() {
 function checkCollision() {
   // Touchdown?
   if (ballCarrier.x === fieldCols - 1) {
-    gameOver = true;
     touchdown = true;
+    if (possession === 'home') scoreHome += 6; else scoreAway += 6;
+    endReason = "Touchdown";
+    nextDriveType = 'kickoff';
+    nextDriveStartX = 4; // receiving team starts at 20
+    gameOver = true;
     return;
   }
 
@@ -363,6 +461,9 @@ function checkCollision() {
         yardsToGo = 10; // Always reset to 10 yards
         setFormationAtLOS();
       } else {
+        endReason = "Turnover on Downs";
+        nextDriveType = 'kickoff';
+        nextDriveStartX = 4;
         gameOver = true; // turnover on 4th
       }
     }
@@ -370,27 +471,70 @@ function checkCollision() {
 }
 
 function attemptPass() {
-  for (let r of receivers) {
-    if (abs(r.x - offense.x) <= 3 && r.y === offense.y) {
-      offense.set(r.x, r.y);
-      ballCarrier = offense;
-      return;
-    }
+  // Passes only allowed to receivers on the same row, within 3 cells
+  // If any defender lies between QB and receiver on that row, it's an interception at that spot.
+  let qbX = offense.x;
+  let qbY = offense.y;
+
+  // Find candidate receivers
+  let candidates = receivers.filter(r => r.y === qbY && Math.abs(r.x - qbX) <= 3);
+  if (candidates.length === 0) return;
+
+  // Choose the closest forward receiver (to the right), else closest overall
+  candidates.sort((a, b) => (a.x - qbX) - (b.x - qbX));
+  let target = candidates.find(r => r.x >= qbX) || candidates[0];
+
+  // Determine path range between QB and target (exclusive of QB, inclusive of target)
+  let minX = Math.min(qbX, target.x);
+  let maxX = Math.max(qbX, target.x);
+
+  // Scan defenders on the same row between qb and target
+  let intercept = defenders
+    .filter(d => d.y === qbY && d.x > minX && d.x <= maxX)
+    .sort((a, b) => (qbX < target.x ? a.x - b.x : b.x - a.x))[0];
+
+  clockSeconds = max(0, clockSeconds - 1);
+  if (clockSeconds === 0) {
+    endReason = "Time Expired";
+    gameOver = true;
+    return;
   }
+
+  if (intercept) {
+    // Interception at defender position
+    ballCarrier = intercept;
+    endReason = "Interception";
+    nextDriveType = 'kickoff';
+    nextDriveStartX = 4;
+    gameOver = true;
+    return;
+  }
+
+  // Completed pass
+  offense.set(target.x, target.y);
+  ballCarrier = offense;
 }
 
 function restartGame() {
   // Reset game state
   gameOver = false;
   touchdown = false;
+  endReason = "";
   currentDown = 1;
   yardsToGo = 10;
-  startX = 1;
-  firstDownLine = 3;
+  // Toggle possession and use next-drive placement
+  possession = (possession === 'home') ? 'away' : 'home';
+  startX = nextDriveStartX;
+  firstDownLine = startX + 2; // 10 yards from LOS
   tackledThisDown = false;
   achievedFirstDownThisPlay = false;
   qbMoveCount = 0;
   defenderMoveCounter = 0;
+  // Basic clock reset for drive
+  clockSeconds = 300;
+  // Reset next-drive defaults back to kickoff from 20
+  nextDriveType = 'kickoff';
+  nextDriveStartX = 4;
 
   // Hide button and restart
   continueButton.hide();
