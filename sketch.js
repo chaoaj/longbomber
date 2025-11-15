@@ -12,15 +12,15 @@ let defenderMoveCounter = 0;
 // Down & distance
 let currentDown = 1;
 let yardsToGo = 10;
-let startX = 1; // line of scrimmage at series start
-let firstDownLine = 3; // to-go marker position (startX + 2 initially)
+let startX = 3; // line of scrimmage at series start (offset by 2 for left end zone)
+let firstDownLine = 5; // to-go marker position (startX + 2 initially)
 let tackledThisDown = false; // only allow one tackle-increment per down
 let achievedFirstDownThisPlay = false; // track first down mid-play without stopping
 
 let cellSize = 40;
 let yardsPerCell = 5;
 let fieldYards = 100;
-let fieldCols = fieldYards / yardsPerCell + 1; // +1 for wider end zone
+let fieldCols = fieldYards / yardsPerCell + 3; // +2 left end zone, +1 right end zone
 let fieldRows = 9;
 let fieldWidth = fieldCols * cellSize;
 let fieldHeight = fieldRows * cellSize;
@@ -33,7 +33,7 @@ let scoreAway = 0;
 let clockSeconds = 300; // 5:00 clock placeholder
 let endReason = ""; // dynamic end-of-drive message (e.g., INTERCEPTION, PUNT)
 let possession = 'home'; // 'home' or 'away'
-let nextDriveStartX = 4; // default kickoff placement (20-yard line)
+let nextDriveStartX = 6; // default kickoff placement (20-yard line, offset by 2)
 let nextDriveType = 'kickoff'; // kickoff | punt | turnover
 let puntDistanceCells = 6; // ~30 yards
 
@@ -189,15 +189,24 @@ function drawField() {
   for (let x = 0; x < fieldWidth; x += cellSize) line(x, 0, x, fieldHeight);
   for (let y = 0; y < fieldHeight; y += cellSize) line(0, y, fieldWidth, y);
 
-  // End zone (last 2 cells)
+  // Left end zone (first 2 cells) - VISITOR
+  fill(50, 150, 50);
+  noStroke();
+  rect(0, 0, cellSize * 2, fieldHeight);
+
+  fill(255);
+  textSize(14);
+  textAlign(CENTER, CENTER);
+  text("VISITOR", cellSize, fieldHeight / 2);
+
+  // Right end zone (last 2 cells) - HOME
   fill(50, 150, 50);
   noStroke();
   rect((fieldCols - 2) * cellSize, 0, cellSize * 2, fieldHeight);
 
   fill(255);
-  textSize(18);
-  textAlign(CENTER, CENTER);
-  text("END\nZONE", (fieldCols - 1) * cellSize, fieldHeight / 2);
+  textSize(16);
+  text("HOME", (fieldCols - 1) * cellSize, fieldHeight / 2);
   textAlign(LEFT, BASELINE);
 
   // Line of Scrimmage (LOS) at right edge of ball, First Down line stays fixed until achieved
@@ -435,7 +444,7 @@ function checkCollision() {
     if (possession === 'home') scoreHome += 6; else scoreAway += 6;
     endReason = "Touchdown";
     nextDriveType = 'kickoff';
-    nextDriveStartX = 4; // receiving team starts at 20
+    nextDriveStartX = 6; // receiving team starts at 20
     gameOver = true;
     return;
   }
@@ -470,7 +479,7 @@ function checkCollision() {
       } else {
         endReason = "Turnover on Downs";
         nextDriveType = 'kickoff';
-        nextDriveStartX = 4;
+        nextDriveStartX = 6;
         gameOver = true; // turnover on 4th
       }
     }
@@ -512,7 +521,7 @@ function attemptPass() {
     ballCarrier = intercept;
     endReason = "Interception";
     nextDriveType = 'kickoff';
-    nextDriveStartX = 4;
+    nextDriveStartX = 6;
     gameOver = true;
     return;
   }
@@ -541,7 +550,7 @@ function restartGame() {
   clockSeconds = 300;
   // Reset next-drive defaults back to kickoff from 20
   nextDriveType = 'kickoff';
-  nextDriveStartX = 4;
+  nextDriveStartX = 6;
 
   // Hide button and restart
   continueButton.hide();
